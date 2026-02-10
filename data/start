@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -e
+
+echo "Container started — running user start script (example)"
+
+# 显示 /app 下的文件
+ls -la /app || true
+
+# 如果用户没有提供 start，可在这里保持容器运行
+# tail -f /dev/null

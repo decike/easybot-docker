@@ -1,0 +1,167 @@
+name: Build and release Docker image
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify .env exists
+        run: |
+          if [ ! -f .env ]; then
+            echo ".env file missing — please add .env to repository root based on .env.template";
+            exit 1;
+          fi
+
+      - name: Load .env into environment and compute OUTPUT_TAR
+        run: |
+          # load .env file (simple KEY=VALUE lines)
+          set -a
+          . ./.env
+          set +a
+
+          # ensure IMAGE_ARCH has default
+          if [ -z "$IMAGE_ARCH" ]; then
+            IMAGE_ARCH="linux/amd64"
+          fi
+
+          # Determine output tar filename if not provided
+          if [ -z "$OUTPUT_TAR" ]; then
+            # Determine AUTHOR_NAME with priority:
+            # 1) FILENAME_AUTHOR (if set)
+            # 2) IMAGE_NAME's organization/namespace (first segment before '/')
+            # 3) derive from AUTHOR (strip <...> and take first token)
+            if [ -n "${FILENAME_AUTHOR:-}" ]; then
+              AUTHOR_NAME="$FILENAME_AUTHOR"
+            elif echo "$IMAGE_NAME" | grep -q '/'; then
+              # IMAGE_NAME may be like registry/org/name or org/name; take first segment
+              # If registry present (contains '.' or ':'), we want the org after registry.
+              # Strategy: remove registry if it contains '.' or ':' and has at least two '/' segments.
+              # Simplest robust approach: if IMAGE_NAME has 2+ '/', assume form registry/org/name; take second segment.
+              # Otherwise take first segment.
+              SLASH_COUNT=$(echo "$IMAGE_NAME" | awk -F'/' '{print NF-1}')
+              if [ "$SLASH_COUNT" -ge 2 ]; then
+                # registry/org/name -> take second segment as org
+                AUTHOR_NAME=$(echo "$IMAGE_NAME" | awk -F'/' '{print $2}')
+              else
+                # org/name -> take first segment
+                AUTHOR_NAME=$(echo "$IMAGE_NAME" | awk -F'/' '{print $1}')
+              fi
+            else
+              # fallback: derive from AUTHOR field
+              AUTHOR_CLEAN=$(echo "$AUTHOR" | sed 's/<.*>//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+              AUTHOR_NAME=$(echo "$AUTHOR_CLEAN" | awk '{print $1}')
+            fi
+
+            # sanitize author name: lowercase, replace non-alnum with underscore
+            AUTHOR_NAME=$(echo "$AUTHOR_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | sed 's/_\+/_/g' | sed 's/^_//;s/_$//')
+
+            # Extract image base name (last segment after /). e.g. my-org/my-image -> my-image
+            IMAGE_BASENAME=$(echo "$IMAGE_NAME" | awk -F'/' '{print $NF}')
+            # sanitize image basename: lowercase, replace risky chars
+            IMAGE_BASENAME=$(echo "$IMAGE_BASENAME" | tr '[:upper:]' '[:lower:]' | sed 's/[:@]/_/g' | sed 's/[^a-z0-9._-]/_/g' | sed 's/_\+/_/g' | sed 's/^_//;s/_$//')
+
+            # Extract platform suffix from IMAGE_ARCH (last segment after '/'), e.g. linux/amd64 -> amd64
+            PLATFORM=$(echo "$IMAGE_ARCH" | awk -F'/' '{print $NF}')
+            # If platform contains comma or space, take first
+            PLATFORM=$(echo "$PLATFORM" | awk -F',' '{print $1}' | awk '{print $1}')
+
+            # sanitize IMAGE_TAG for filename: replace slashes/colons with underscore
+            SAFE_TAG=$(echo "$IMAGE_TAG" | sed 's#[/:]#_#g')
+
+            OUTPUT_TAR="${AUTHOR_NAME}_${IMAGE_BASENAME}_${SAFE_TAG}-${PLATFORM}.tar.gz"
+          fi
+
+          # prepare TAR filename if still empty (fallback)
+          if [ -z "$OUTPUT_TAR" ]; then
+            FNAME=$(echo "$IMAGE_NAME" | sed 's#[/:]#_##g')
+            OUTPUT_TAR="${FNAME}-${IMAGE_TAG}.tar.gz"
+          fi
+
+          # Export variables to GITHUB_ENV for other steps
+          echo "VERSION=${IMAGE_TAG}" >> $GITHUB_ENV
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "IMAGE_ARCH=$IMAGE_ARCH" >> $GITHUB_ENV
+          echo "AUTHOR=$AUTHOR" >> $GITHUB_ENV
+          echo "EXTRA_BUILD_ARGS=$EXTRA_BUILD_ARGS" >> $GITHUB_ENV
+          echo "DOCKERFILE_PATH=${DOCKERFILE_PATH:-Dockerfile}" >> $GITHUB_ENV
+          echo "BUILD_CONTEXT=${BUILD_CONTEXT:-.}" >> $GITHUB_ENV
+          echo "OUTPUT_TAR=$OUTPUT_TAR" >> $GITHUB_ENV
+          echo "RELEASE_DRAFT=${RELEASE_DRAFT:-false}" >> $GITHUB_ENV
+          echo "RELEASE_PRERELEASE=${RELEASE_PRERELEASE:-false}" >> $GITHUB_ENV
+          echo "RELEASE_TAG_PREFIX=${RELEASE_TAG_PREFIX:-v}" >> $GITHUB_ENV
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image with buildx (load into local docker)
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          IMAGE_ARCH: ${{ env.IMAGE_ARCH }}
+          AUTHOR: ${{ env.AUTHOR }}
+          VERSION: ${{ env.VERSION }}
+          EXTRA_BUILD_ARGS: ${{ env.EXTRA_BUILD_ARGS }}
+          DOCKERFILE_PATH: ${{ env.DOCKERFILE_PATH }}
+          BUILD_CONTEXT: ${{ env.BUILD_CONTEXT }}
+        run: |
+          echo "Building $IMAGE_NAME:$IMAGE_TAG for platform $IMAGE_ARCH"
+          # convert EXTRA_BUILD_ARGS into docker build args if present
+          BUILD_ARG_FLAGS=""
+          if [ -n "$EXTRA_BUILD_ARGS" ]; then
+            for kv in $EXTRA_BUILD_ARGS; do
+              BUILD_ARG_FLAGS="$BUILD_ARG_FLAGS --build-arg $kv"
+            done
+          fi
+
+          docker buildx build \
+            --platform "$IMAGE_ARCH" \
+            -f "$DOCKERFILE_PATH" \
+            -t "$IMAGE_NAME:$IMAGE_TAG" \
+            --load \
+            --build-arg AUTHOR="$AUTHOR" \
+            --build-arg VERSION="$VERSION" \
+            --build-arg IMAGE_NAME="$IMAGE_NAME" \
+            $BUILD_ARG_FLAGS \
+            "$BUILD_CONTEXT"
+
+      - name: Save image to tar.gz
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          OUTPUT_TAR: ${{ env.OUTPUT_TAR }}
+        run: |
+          echo "Saving $IMAGE_NAME:$IMAGE_TAG to $OUTPUT_TAR"
+          docker save "$IMAGE_NAME:$IMAGE_TAG" | gzip > "$OUTPUT_TAR"
+          echo "TAR_PATH=$OUTPUT_TAR" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.RELEASE_TAG_PREFIX }}${{ env.IMAGE_TAG }}
+          release_name: ${{ env.IMAGE_NAME }} ${{ env.IMAGE_TAG }}
+          body: "Docker image built by GitHub Actions"
+          draft: ${{ env.RELEASE_DRAFT }}
+          prerelease: ${{ env.RELEASE_PRERELEASE }}
+
+      - name: Upload image tar.gz to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ env.TAR_PATH }}
+          asset_name: ${{ env.OUTPUT_TAR }}
+          asset_content_type: application/gzip
