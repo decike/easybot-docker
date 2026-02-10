@@ -12,18 +12,38 @@ LABEL org.opencontainers.image.version="$VERSION"
 LABEL org.opencontainers.image.title="$IMAGE_NAME"
 
 # 安装系统 & 图形 & Chromium 依赖
-RUN apt-get update && apt-get install -y \
-    libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 \
-    libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 \
-    libxss1 libxtst6 libgl1-mesa-glx libegl1-mesa libgbm1 libdrm2 \
-    libxcb-glx0 libxshmfence1 libxxf86vm1 libxv1 libpci3 \
-    libxcb-dri2-0 libxcb-dri3-0 libwayland-client0 libwayland-cursor0 \
-    libwayland-egl1 libwayland-protocols libepoxy0 \
-    libgtk-3-0 libatk1.0-0 libcairo2 libpango-1.0-0 libpangocairo-1.0-0 \
-    libnss3 libnspr4 libfontconfig1 fonts-liberation fonts-noto-color-emoji \
-    ca-certificates xdg-utils libdbus-1-3 libappindicator3-1 \
-    libasound2 libstdc++6 libc6 libgcc-s1 libgdk-pixbuf2.0-0 \
-    libglib2.0-0 libexpat1 gconf2 curl unzip \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libappindicator3-1 \
+        libasound2 \
+        libatk-bridge2.0-0 \
+        libatk1.0-0 \
+        libcairo2 \
+        libcups2 \
+        libdbus-1-3 \
+        libexpat1 \
+        libfontconfig1 \
+        libgbm1 \
+        libglib2.0-0 \
+        libgtk-3-0 \
+        libnspr4 \
+        libnss3 \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libx11-6 \
+        libx11-xcb1 \
+        libxcb1 \
+        libxcomposite1 \
+        libxcursor1 \
+        libxdamage1 \
+        libxext6 \
+        libxfixes3 \
+        libxi6 \
+        libxrandr2 \
+        libxrender1 \
+        libxss1 \
+        libxtst6 \
+        xdg-utils \
+        xvfb \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
