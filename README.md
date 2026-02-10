@@ -1,20 +1,40 @@
-# DockerImageBuilder
+# EasyBot Docker
 
-此仓库为一个 GitHub Actions 模板，用来：
+本项构建了能使用 EasyBot 的 Docker 镜像，支持图片渲染。本项目不包含easybot本体，也不包含napcat。只支持AMD64架构/平台，如果需要构建其他架构/平台的镜像，请 **Fork** 本项目，然后修改 ``.env`` 中的 ``IMAGE_ARCH`` 并在 **Action** 中运行 `Build and release Docker image` ，详细教程可以看 [DockerImageBuilder](https://github.com/decike/DockerImageBuilder) 。
 
-1. 从仓库的 `data/` 目录构建 Docker 镜像（所有 `data` 下的文件都会被复制到镜像的 `/app`）
-2. 把构建出的镜像导出为 `.tar.gz` 并上传到 GitHub Release
+## 使用方法
 
-## 使用步骤
+### 1. 准备工作
 
-1. 将本仓库模板复制到你的仓库
-2. 根据 `.env.template` 创建根目录下的 `.env` 并填写 `IMAGE_NAME` 与 `IMAGE_TAG`
-3. 把你要包含进镜像的所有文件放到 `data/`
-4. 提交并推送到 GitHub，到 **Actions** 面板手动触发 `Build and release Docker image` 工作流
-5. 完成后，在仓库 **Releases** 页面会看到新建的 release，内含镜像 `.tar.gz` 文件
+1. 访问仓库的 [Releases](https://github.com/decike/easybot-docker/releases) 页面，下载最新的 `easybot-docker-*.tar.gz` 文件，并加载到 Docker：
+    ```bash
+    # 下载tar.gz
+    wget https://github.com/decike/easybot-docker/releases/download/v0.1.1/decike_easybot-docker_0.1.1-amd64.tar.gz -O decike_easybot-docker.tar.gz
+    # 载入镜像
+    docker load -i decike_easybot-docker.tar.gz
+    # 删掉下载的临时文件
+    rm -rf decike_easybot-docker.tar.gz
+    ```
+2. 下载最新版 EasyBot 解压(下面的链接可能不是最新的，需要你去👉[这里](https://files.inectar.cn/easybot/dev)👈找到linux版 **注意是linux版！** 并复制最新的下载地址到下面)
+    ```bash
+    # 新建一个easybot目录，这个目录就是日后存放easybot所有数据的地方
+    mkdir easybot
+    # 下载（这里需要改成最新的地址）
+    wget https://files.inectar.cn/p/ftp/easybot/dev/2.0.0-dev.14/linux-x64/easybot-dev-linux-x64-2.0.0-dev.14.zip -O easybot.zip
+    # 解压
+    unzip easybot.zip -d easybot
+    ```
 
-## 注意事项
-
-- 请确保 `BUILD_CONTEXT` 包含 `data/`（默认 `.` 即仓库根）
-- 如果 `data/` 包含大量或大体积文件，会增加构建时间和生成的 tar 大小
-- 运行容器时不要把宿主目录挂载到 `/app`（否则会覆盖镜像内的文件）
+### 2. 运行
+让容器将容器内的 5000 和 26990 端口暴露到宿主机，并确保服务监听所有网卡（0.0.0.0）：
+```bash
+docker run -d \
+  --name eazybot \
+  -p 5000:5000 -p 26990:26990 \
+  -v ./easybot:/app \
+  -e TZ=Asia/Shanghai \
+  --restart unless-stopped \
+  decike/easybot-docker
+```
+### 3. 使用
+使用就跟官方文档的一样了，可以去看看 👉[官方文档](https://docs.inectar.cn/docs/easybot/intor)👈
